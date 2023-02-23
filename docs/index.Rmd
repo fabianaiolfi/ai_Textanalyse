@@ -809,7 +809,7 @@ ai_corpus_unique_words <- ai_corpus_unique_words %>%
 # Show top n long words
 ```
 
-## Textanalse: Wort- und Satzlänge
+## Textanalyse: Wort- und Satzlänge
 
 ```{r Average Sentence Length of each article, cache=T}
 # Function to measure average sentence length
