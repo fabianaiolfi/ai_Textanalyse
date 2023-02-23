@@ -1,26 +1,41 @@
 ---
-title: "Textanalyse"
-author: "Fabian Aiolfi"
-date: "`r Sys.Date()`"
+title: "ai. Textanalyse"
+#author: "Fabian Aiolfi"
+#date: "`r Sys.Date()`"
 output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE)
-
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE)
 library(here)
 library(tidyverse)
 library(tidytext)
 library(tm)
-
+library(topicmodels)
+library(readr)
+library(udpipe)
+library(scales)
+library(doc2vec)
+#library(stargazer)
+library(kableExtra)
 setwd(here())
 ```
 
-```{r Data Import}
+```{r Data Import, cache=T}
 ai_full <- read.csv("../data/swissdox/read_csv_example/jk_export.csv")
 ```
 
-```{r Examination and Duplicates}
+```{r Add Small is beautiful}
+sib_txt <- read_file("../data/sib.txt")
+ai_full <- ai_full %>% add_row(pubDate = "2023-02-15",
+                               ru = "Wirtschaft",
+                               ht = "«Small is beautiful»: Die Öko-Bibel polarisiert seit einem halben Jahrhundert",
+                               sm = "Mit seinem Buch «Small is beautiful» spiegelte Ernst F. Schumacher den vor 50 Jahren entstandenen konsumkritischen Zeitgeist.",
+                               tx = sib_txt,
+                               ct = 1)
+```
+
+```{r Examination and Duplicates, eval=FALSE, include=FALSE}
 # nrow(ai_full) # 6597 rows
 # ai_full %>% select(id) %>% distinct(id) # 6597
 # ai_full %>% select(ht) %>% distinct(ht) # 5917
@@ -29,7 +44,7 @@ ai_full <- read.csv("../data/swissdox/read_csv_example/jk_export.csv")
 # hist(ai_full$nz)
 ```
 
-```{r Clean Data}
+```{r Clean Data, cache=T}
 unknown_sections <- c("", " ", "dl", "hv", "if", "ip", "iu", "iw", "kc")
 boerse <- c("Börse Schweiz Text","Börsen und Märkte","Börsen und Märkte (bm)","Börse Schweiz Text (WIRTSCHAFT)","Börsen und Märkte","Börsen und Märkte (bm)")
 feuilleton <- c("feuilleton","Feuilleton","Feuilleton (fe)")
@@ -48,6 +63,8 @@ ai_clean <- ai_full %>% select(id, so_txt, pubDate, rq, ru, ht, sm, ut, nz, ct, 
   select(!ct) %>% 
   distinct(ht, .keep_all = T) %>% 
   mutate(pubDate = as.Date(pubDate, format =  "%Y-%m-%d")) %>% 
+  mutate(year = format(pubDate, format="%Y")) %>%
+  mutate(year = as.numeric(year)) %>%
   # Clean Section
   mutate(rubrik = paste(rq, ru, sep = " ")) %>%
   mutate(rubrik = str_replace(rubrik, "^\\ ", "")) %>%  # remove space at beginning
@@ -92,16 +109,17 @@ ai_clean <- ai_clean %>%
   mutate(tx_clean_nchar = nchar(tx_clean))
 ```
 
-# ai. Textanalyse
+## Was ist das?
+-   Eine kleine Textanalyse der Artikelsammlung von Sergio Aiolfi
+-   Die Artikel sind aus der SwissDox-Datenbank, die mit den Suchbegriffen «Sergio Aiolfi» und «ai.» gefunden wurden
 
-## Was das ist
+### Ungenauigkeiten
+-   Der Datensatz ist nicht perfekt, es gibt z.T. Duplikate, beispielsweise leicht veränderte Artikel für nzz.ch
+-   Auch gibt es z.T. Artikel anderer Journalisten (z.B. Beat Gygi), aber nur wenige
 
--   Textanalyse der Artikelsammlung von Sergio Aiolfi
--   Artikel aus SwissDox-Datenbank, die mit den Suchbegriffen «Sergio Aiolfi» oder «ai.» aufgetaucht sind
+### Umfang der Analyse
 
-## Umfang der Analyse
-
-```{r Umfang}
+```{r Umfang, cache=T}
 # Number of articles
 number_of_articles <- nrow(ai_clean)
 
@@ -109,10 +127,6 @@ number_of_articles <- nrow(ai_clean)
 ai_clean <- ai_clean %>% mutate(word_count = str_count(tx_clean, '\\w+'))
 total_wc <- sum(ai_clean$word_count) # 2'782'881
 
-# Average word length per article
-ai_clean <- ai_clean %>% mutate(avg_word_len = ((tx_clean_nchar - word_count) / word_count))
-plot(ai_clean$word_count, ai_clean$avg_word_len)
-  
 # First article
 first_date <- min(ai_clean$pubDate)
 first_date_title <- ai_clean %>% select(pubDate, ht) %>% 
@@ -126,9 +140,9 @@ last_date_title <- ai_clean %>% select(pubDate, ht) %>%
 last_date_title <- last_date_title[1,2]
 
 # Date Range
-time_range <- difftime(last_date, first_date, units="days")/365
-time_range <- as.numeric(time_range)
-time_range <- round(time_range, 1)
+# time_range <- difftime(last_date, first_date, units="days")/365
+# time_range <- as.numeric(time_range)
+# time_range <- round(time_range, 1)
 
 # Nicely format date string
 first_date <- format(first_date, "%d %B %Y")
@@ -141,33 +155,36 @@ total_nchar <- sum(ai_clean$tx_clean_nchar) # 20'778'399
 #unique_words <- nrow(ai_corpus_unique_words) # 112'925 # this will throw an error becaus ai_corpus_unique_words is defined further below
 ```
 
--   number_of_articles Artikel werden untersucht über einer Zeitspanne von time_range Jahren
-- Anzahl Wörter: total_wc
-- Anzahl Zeichen: total_nchar
-- Wortschatzgrösse: unique_words
--   Erster Artikel in den Daten: first_date_title, publiziert am first_date
--   Neuster Artikel in den Daten: last_date_title, publiziert am last_date
-
-## Ungenauigkeiten
-
--   Duplikate Artikel, z.B. gedruckte Zeitung und nzz.ch
--   Aritkel anderer Journis, z.B. Beat Gygi
+-   Anzahl Artikel: `r number_of_articles`
+-   Anzahl Wörter: `r total_wc`
+-   Anzahl Zeichen: `r total_nchar`
+-   Erster Artikel: «`r first_date_title`» (`r first_date`)
+-   Letzter Artikel: «`r last_date_title`» (`r last_date`)
 
 ## Analyse der Rubriken
+### Anzahl Artikel pro Rubrik
 
-```{r Sections Count}
+```{r Sections Count, fig.height=10, warning=FALSE, cache=TRUE}
 # Count all categories
 rubrik_count <- ai_clean %>%
   select(rubrik) %>% 
   count(rubrik)
 
 ggplot(rubrik_count, aes(y = reorder(rubrik, n), x = n)) +
-  geom_bar(stat="identity") +
-  geom_text(aes(label = format(round(n, digits = 0))), vjust=0.5, hjust=-0.25) +
-  theme_minimal()
+  geom_bar(stat="identity", fill = "#374e8e") +
+  geom_text(aes(label = format(round(n, digits = 0))), size = 2.5, vjust=0.5, hjust=-0.25) +
+  scale_x_continuous(position = "top", limits = c(0,3800)) +
+  xlab(" ") +
+  ylab(" ") +
+  theme_minimal() +
+  theme(panel.grid.major.y = element_blank(), # remove the vertical grid lines
+        panel.grid.major.x = element_line(size=.1, color="black" ) 
+)
 ```
 
-```{r Sections over Time}
+### Anzahl Artikel pro Rubrik pro Jahr
+
+```{r Sections over Time, cache=T}
 # Convert low category count to "Andere"
 rubrik_other <- rubrik_count %>% 
   filter(n < 145) %>% 
@@ -177,23 +194,103 @@ rubrik_other <- as.array(rubrik_other$rubrik)
 
 ai_clean <- ai_clean %>% 
   mutate(rubrik_graph = case_when(rubrik %in% rubrik_other ~ "Andere",
+                                  rubrik == "Unbekannt" ~ "Andere",
                                   TRUE ~ as.character(rubrik)))
 
-section_over_time <- ai_clean %>% select(pubDate, rubrik_graph) %>% 
-  mutate(year = format(pubDate, format="%Y")) %>%
+section_over_time <- ai_clean %>% select(year, rubrik_graph) %>% 
   count(year, rubrik_graph)
 
 ggplot(section_over_time, aes(x=year, y=n, fill=rubrik_graph)) +
   geom_bar(stat="identity") +
-  theme_minimal()
-
-# To do
-# Andere and Unbekannt together
-# evtl. 5-7 categories
+  ylab(" ") +
+  xlab(" ") +
+  scale_fill_manual(values = c("#8aabfd", "#4fbbae", "#374e8e", "#ac004f", "#df7c18", "#e3b13e")) +
+  theme_minimal() +
+  guides(fill = guide_legend(nrow = 1)) +
+  scale_x_continuous(expand = c(0, 0), breaks = pretty_breaks(n = 15)) +
+  theme(panel.grid.major.x = element_blank(), # remove the vertical grid lines
+        panel.grid.minor.x = element_blank(), # remove the vertical grid lines
+        panel.grid.major.y = element_line(size=.1, color="black"),
+        legend.position="bottom",
+        legend.title=element_blank())
 ```
 
-## Analyse über Zeit
-```{r Number of articles per year over time}
+### Artikel im Vector Space
+
+```{r, fig.height=10, cache=T}
+# Document Embeddings
+embeddings_clean <- ai_clean %>% 
+  select(id, tx_clean, rubrik_graph, year)
+
+embeddings_clean$tx_clean <- tolower(embeddings_clean$tx_clean)
+embeddings_clean$tx_clean <- gsub("[^[:alpha:]]", " ", embeddings_clean$tx_clean)
+embeddings_clean$tx_clean <- gsub("[[:space:]]+", " ", embeddings_clean$tx_clean)
+embeddings_clean$tx_clean <- trimws(embeddings_clean$tx_clean)
+embeddings_clean$nwords <- txt_count(embeddings_clean$tx_clean, pattern = " ")
+embeddings_clean <- subset(embeddings_clean, nwords < 1000 & nchar(tx_clean) > 0)
+
+embeddings_clean <- embeddings_clean %>% 
+  rename("doc_id" = id) %>% 
+  rename("text" = tx_clean)
+
+model_embedding <- paragraph2vec(x = embeddings_clean,
+                                 type = "PV-DM",
+                                 dim = 50,
+                                 iter = 20,  
+                                 min_count = 5,
+                                 lr = 0.05,
+                                 threads = 1)
+
+embedding <- as.matrix(model_embedding, which = "docs")
+embedding <- as.data.frame(embedding)
+
+pca_embedding <- prcomp(embedding)
+
+pca_embedding_graph <- pca_embedding$x %>% as.data.frame()
+pca_embedding_graph <- tibble::rownames_to_column(pca_embedding_graph, "id")
+pca_embedding_graph$id <- as.numeric(pca_embedding_graph$id)
+rubrik_id <- ai_clean %>% select(id, rubrik_graph)
+pca_embedding_graph <- pca_embedding_graph %>% left_join(rubrik_id, by = "id")
+
+ggplot(pca_embedding_graph, aes(x = PC2, y = PC1, color = rubrik_graph)) +
+  geom_point(size = 2, alpha = 0.5) +
+  ylab(" ") +
+  xlab(" ") +
+  scale_color_manual(values = c("#8aabfd", "#4fbbae", "#374e8e", "#ac004f", "#df7c18", "#e3b13e")) +
+  theme_minimal() +
+  guides(color = guide_legend(nrow = 1)) +
+  theme(panel.grid.major.x = element_line(size=.1, color="black"),
+        panel.grid.minor.x = element_blank(), # remove the vertical grid lines
+        panel.grid.major.y = element_line(size=.1, color="black"),
+        legend.position="bottom",
+        legend.title=element_blank())
+```
+
+## Zeit-Analyse
+### Vector Space und Zeit
+
+```{r, fig.height=10, cache=T}
+pca_embedding_graph <- pca_embedding$x %>% as.data.frame()
+pca_embedding_graph <- tibble::rownames_to_column(pca_embedding_graph, "id")
+pca_embedding_graph$id <- as.numeric(pca_embedding_graph$id)
+rubrik_id <- ai_clean %>% select(id, year)
+pca_embedding_graph <- pca_embedding_graph %>% left_join(rubrik_id, by = "id")
+
+ggplot(pca_embedding_graph, aes(x = PC2, y = PC1, color = year)) +
+  geom_point(size = 2, alpha = 0.5) +
+  ylab(" ") +
+  xlab(" ") +
+  scale_colour_gradient(low = "#e3b13e", high = "#383751") +
+  theme_minimal() +
+  guides(color = guide_legend(nrow = 1)) +
+  theme(panel.grid.major.x = element_line(size=.1, color="black"),
+        panel.grid.minor.x = element_blank(), # remove the vertical grid lines
+        panel.grid.major.y = element_line(size=.1, color="black"),
+        legend.position="bottom",
+        legend.title=element_blank())
+```
+
+```{r Number of articles per year over time, eval=FALSE, include=FALSE, cache=T}
 articles_by_year <- ai_clean %>% select(id, pubDate) %>% 
   mutate(year = format(pubDate, format="%Y")) %>% 
   count(year)
@@ -202,28 +299,54 @@ ggplot(articles_by_year, aes(x=year, y=n)) +
   geom_bar(stat="identity")
 ```
 
-```{r Number of articles over all time by month}
+### Artikel Pro Monat
+
+```{r Number of articles over all time by month, cache=T}
 articles_by_month <- ai_clean %>% select(id, pubDate) %>%
   mutate(month = format(pubDate, format="%m")) %>%
   count(month)
 
 ggplot(articles_by_month, aes(x=month, y=n)) +
-  geom_bar(stat="identity")
+  geom_bar(stat="identity", fill = "#374e8e") +
+  ylab(" ") +
+  xlab(" ") +
+  #scale_fill_manual(values = c("#8aabfd", "#4fbbae", "#374e8e", "#ac004f", "#df7c18", "#e3b13e")) +
+  theme_minimal() +
+  #guides(fill = guide_legend(nrow = 1)) +
+  #scale_x_continuous(expand = c(0, 0), breaks = pretty_breaks(n = 15)) +
+  theme(panel.grid.major.x = element_blank(), # remove the vertical grid lines
+        panel.grid.minor.x = element_blank(), # remove the vertical grid lines
+        panel.grid.major.y = element_line(size=.1, color="black"),
+        legend.position="bottom",
+        legend.title=element_blank())
 ```
 
-```{r Print vs online over time}
+### Print vs Online
+
+```{r Print vs online over time, cache=T}
 pub_over_time <- ai_clean %>%
-  select(pubDate, so_txt) %>% 
-  mutate(year = format(pubDate, format="%Y")) %>% 
+  select(pubDate, so_txt, year) %>% 
+  filter(so_txt == "Neue Zürcher Zeitung" | so_txt == "nzz.ch") %>% 
+  #mutate(year = format(pubDate, format="%Y")) %>% 
   count(so_txt, year)
 
 ggplot(pub_over_time, aes(x=year, y=n, fill=so_txt)) +
-  geom_bar(stat="identity")
+  geom_bar(stat="identity") +
+  ylab(" ") +
+  xlab(" ") +
+  scale_fill_manual(values = c("#e3b13e", "#ac004f")) +
+  theme_minimal() +
+  scale_x_continuous(expand = c(0, 0), breaks = pretty_breaks(n = 15)) +
+  theme(panel.grid.major.x = element_blank(), # remove the vertical grid lines
+        panel.grid.minor.x = element_blank(), # remove the vertical grid lines
+        panel.grid.major.y = element_line(size=.1, color="black"),
+        legend.position="bottom",
+        legend.title=element_blank())
 ```
 
-
 ## Artikellänge
-```{r Article length over time}
+
+```{r Article length over time, eval=FALSE, include=FALSE, cache=T}
 length_over_time <- ai_clean %>% select(pubDate, nz) %>% 
   mutate(year = format(pubDate, format="%Y")) %>% 
   group_by(year) %>% 
@@ -234,17 +357,29 @@ ggplot(length_over_time, aes(x=year, y=nz_mean)) +
 # maybe add min and max of each year too, as a spread?
 ```
 
-```{r Article character length (with spaces) over time: Spread Boxplot}
+### Min, Max und Median Anzahl Zeichen Pro Jahr
+
+```{r Article character length with spaces over time: Spread Boxplot, cache=T}
 len_over_time <- ai_clean %>% 
-  select(pubDate, tx_clean_nchar) %>% 
-  mutate(year = format(pubDate, format="%Y"))
+  select(pubDate, tx_clean_nchar, year)
 
 ggplot(len_over_time, aes(x = year, y = tx_clean_nchar, group = year)) +
-  geom_boxplot(coef = 10)
+  geom_boxplot(coef = 10, fill = "#4fbbae") +
+  ylab(" ") +
+  xlab(" ") +
+  #scale_fill_manual(values = c("#e3b13e", "#ac004f")) +
+  theme_minimal() +
+  scale_x_continuous(expand = c(0, 0.5), breaks = pretty_breaks(n = 15)) +
+  theme(panel.grid.major.x = element_blank(), # remove the vertical grid lines
+        panel.grid.minor.x = element_blank(), # remove the vertical grid lines
+        panel.grid.major.y = element_line(size=.1, color="black"),
+        legend.position="bottom",
+        legend.title=element_blank())
 ```
 
 ### Kürzester und längster Artikel
-```{r Shortest article}
+
+```{r Article length, cache=T}
 shortest_article <- ai_clean %>%
   select(pubDate, so_txt, rubrik, ht, sm, ut, tx_clean, tx_clean_nchar) %>% 
   slice(which.min(tx_clean_nchar))
@@ -253,10 +388,7 @@ shortest_article_title <- shortest_article$ht
 shortest_article_date <- shortest_article$pubDate
 shortest_article_rubrik <- shortest_article$rubrik
 shortest_article_len <- shortest_article$tx_clean_nchar
-```
-- Kürzester Artikel: shortest_article_title (shortest_article_rubrik), publiziert am shortest_article_date mit shortest_article_len Zeichen
 
-```{r Longest article}
 longest_article <- ai_clean %>%
   select(pubDate, so_txt, rubrik, ht, sm, ut, tx_clean, tx_clean_nchar) %>% 
   slice(which.max(tx_clean_nchar))
@@ -266,10 +398,12 @@ longest_article_date <- longest_article$pubDate
 longest_article_rubrik <- longest_article$rubrik
 longest_article_len <- longest_article$tx_clean_nchar
 ```
-- Längster Artikel: longest_article_title (longest_article_rubrik) am longest_article_date mit einer Länge von longest_article_len
+-   Kürzester Artikel: «`r shortest_article_title`» (`r shortest_article_date`) in `r shortest_article_rubrik` mit `r shortest_article_len` Zeichen
+-   Längster Artikel: «`r longest_article_title`» (`r longest_article_date`) in `r longest_article_rubrik` mit `r longest_article_len` Zeichen
 
-### Titellängen
-```{r Longest Title}
+### Längster Titel
+
+```{r Longest Title, cache=T}
 ai_clean <- ai_clean %>% mutate(title_len = str_count(ht, '\\w+'))
 
 # shortest_title <- ai_clean %>%
@@ -285,14 +419,25 @@ longest_title_title <- longest_title$ht
 longest_title_date <- longest_title$pubDate
 longest_title_rubrik <- longest_title$rubrik
 ```
+-   Längster Titel: «`r longest_title_title`» (`r longest_title_date`) in `r longest_title_rubrik`
 
-```{r Average Title Length over Time}
+### Min, Max und Median Titellängen Pro Jahr
+
+```{r Average Title Length over Time, cache=T}
 title_len_over_time <- ai_clean %>% 
-  select(pubDate, title_len) %>% 
-  mutate(year = format(pubDate, format="%Y"))
+  select(pubDate, title_len, year)
 
 ggplot(title_len_over_time, aes(x = year, y = title_len, group = year)) +
-  geom_boxplot(coef = 10)
+  geom_boxplot(coef = 10, fill = "#8aabfd") +
+  ylab("Anzahl Wörter") +
+  xlab(" ") +
+  theme_minimal() +
+  scale_x_continuous(expand = c(0, 0.5), breaks = pretty_breaks(n = 15)) +
+  theme(panel.grid.major.x = element_blank(), # remove the vertical grid lines
+        panel.grid.minor.x = element_blank(), # remove the vertical grid lines
+        panel.grid.major.y = element_line(size=.1, color="black"),
+        legend.position="bottom",
+        legend.title=element_blank())
 ```
 
 ## Textanalyse: Ngrams
@@ -319,10 +464,11 @@ ai_corpus_with_stopwords <- tm_map(ai_corpus_with_stopwords, removeWords, error_
 ai_corpus_with_stopwords <- data.frame(text = sapply(ai_corpus_with_stopwords, as.character), stringsAsFactors = FALSE) # convert corpus to DF
 ```
 
-### 10 häufigsten Wörter (ohne Stopwörter)
-- Stopwörter entfernt
-- Satzzeichen entfernt
-- Alles kleingeschrieben
+### 10 Häufigsten Wörter (ohne Stopwörter)
+-   Stopwörter entfernt
+-   Satzzeichen entfernt
+-   Alles kleingeschrieben
+
 ```{r Unigram Graph, cache=TRUE}
 ai_corpus_unigram <- ai_corpus_no_stopwords %>%
   unnest_tokens(unigram, text, token = "ngrams", n = 1) %>% # n = 2 for bigrams etc, n=1 for most popular word
@@ -337,17 +483,22 @@ ai_corpus_unusual <- ai_corpus_unigram %>% filter(n == 1) %>% select(unigram)
 ai_corpus_unigram <- head(ai_corpus_unigram, n = 10)
 
 ggplot(ai_corpus_unigram, aes(y = reorder(unigram, n), x = n)) +
-  geom_bar(stat="identity") +
-  geom_text(aes(label = format(round(n, digits = 0))), vjust=0.5, hjust=-0.25) +
-  theme_minimal()
+  geom_bar(stat="identity", fill = "#374e8e") +
+  geom_text(aes(label = format(round(n, digits = 0))), size = 2.5, vjust=0.5, hjust=-0.25) +
+  ylab(" ") +
+  xlab(" ") +
+  theme_minimal() +
+  theme(panel.grid.major.y = element_blank(), # remove the vertical grid lines
+        panel.grid.major.x = element_line(size=.1, color="black" ))
 ```
 
-### Häufigste Wörter pro Jahr
-```{r Unigram by Year}
+### Die Häufigsten Wörter pro Jahr
+
+```{r Unigram by Year, cache=T, results='asis'}
 rm(unigram_by_year)
 
 unigram_by_year <- ai_clean %>% 
-  select(pubDate) %>% 
+  select(pubDate, year) %>% 
   mutate(id = row_number())
 
 ai_corpus_no_stopwords_id <- ai_corpus_no_stopwords %>% 
@@ -355,8 +506,8 @@ ai_corpus_no_stopwords_id <- ai_corpus_no_stopwords %>%
 
 unigram_by_year <- unigram_by_year %>% 
   left_join(ai_corpus_no_stopwords_id, by = "id") %>% 
-  select(!id) %>% 
-  mutate(year = format(pubDate, format="%Y"))
+  select(!id)# %>% 
+  #mutate(year = format(pubDate, format="%Y"))
 
 unigram_by_year <- unigram_by_year %>%
   unnest_tokens(unigram, text, token = "ngrams", n = 1) %>%
@@ -364,10 +515,29 @@ unigram_by_year <- unigram_by_year %>%
   count(unigram, year) %>%  #, sort = TRUE)
   group_by(year) %>% 
   top_n(3, n)
+
+unigram_by_year_table <- unigram_by_year %>% 
+  select(unigram, year) %>% 
+  arrange(year) %>% 
+  group_by(year) %>% 
+  mutate(top_words = paste0(unigram, collapse = " ")) %>% 
+  distinct(year, top_words)
+
+unigram_by_year_table <- as.data.frame(unigram_by_year_table)
+unigram_by_year_table$year <- as.character(unigram_by_year_table$year)
+
+kable(unigram_by_year_table, "html", col.names = c("Jahr", "3 Häufigsten Wörter")) %>%
+  kable_styling("striped")
+
+# stargazer(unigram_by_year_table,
+#           summary = F,
+#           type = "html",
+#           rownames = FALSE,
+#           column.labels = c("Jahr", "Häufigsten 3 Wörter"))
 ```
 
+### 10 Häufigsten Wortpaare (ohne Stopwörter)
 
-### 10 häufigste Wortpaare (ohne Stopwörter)
 ```{r Bigram Graph, cache=TRUE}
 ai_corpus_bigram <- ai_corpus_no_stopwords %>%
   unnest_tokens(bigram, text, token = "ngrams", n = 2) %>% # n = 2 for bigrams etc, n=1 for most popular word
@@ -377,14 +547,17 @@ ai_corpus_bigram <- ai_corpus_no_stopwords %>%
 ai_corpus_bigram <- head(ai_corpus_bigram, n = 10)
 
 ggplot(ai_corpus_bigram, aes(y = reorder(bigram, n), x = n)) +
-  geom_bar(stat="identity") +
-  geom_text(aes(label = format(round(n, digits = 0))), vjust=0.5, hjust=-0.25) +
-  theme_minimal()
-
-# To do: Show bigrams in context?
+  geom_bar(stat="identity", fill = "#1b87aa") +
+  geom_text(aes(label = format(round(n, digits = 0))), size = 2.5, vjust=0.5, hjust=-0.25) +
+  ylab(" ") +
+  xlab(" ") +
+  theme_minimal() +
+  theme(panel.grid.major.y = element_blank(), # remove the vertical grid lines
+        panel.grid.major.x = element_line(size=.1, color="black" ))
 ```
 
-### 10 häufigste Trigramme (inkl. Stopwörter)
+### 10 Häufigsten 3er-Wortgruppen (inkl. Stopwörter)
+
 ```{r Trigram Graph, cache=TRUE}
 ai_corpus_trigram <- ai_corpus_with_stopwords %>%
   unnest_tokens(trigram, text, token = "ngrams", n = 3) %>% # n = 2 for bigrams etc, n=1 for most popular word
@@ -394,14 +567,17 @@ ai_corpus_trigram <- ai_corpus_with_stopwords %>%
 ai_corpus_trigram <- head(ai_corpus_trigram, n = 10)
 
 ggplot(ai_corpus_trigram, aes(y = reorder(trigram, n), x = n)) +
-  geom_bar(stat="identity") +
-  geom_text(aes(label = format(round(n, digits = 0))), vjust=0.5, hjust=-0.25) +
-  theme_minimal()
-
-# To do: Show trigrams in context?
+  geom_bar(stat="identity", fill = "#4fbbae") +
+  geom_text(aes(label = format(round(n, digits = 0))), size = 2.5, vjust=0.5, hjust=-0.25) +
+  ylab(" ") +
+  xlab(" ") +
+  theme_minimal() +
+  theme(panel.grid.major.y = element_blank(), # remove the vertical grid lines
+        panel.grid.major.x = element_line(size=.1, color="black" ))
 ```
 
-### 10 häufigste Viergramme (inkl. Stopwörter)
+### 10 Häufigsten 4er-Wortgruppen (inkl. Stopwörter)
+
 ```{r Fourgram Graph, cache=TRUE}
 ai_corpus_fourgram <- ai_corpus_with_stopwords %>%
   unnest_tokens(fourgram, text, token = "ngrams", n = 4) %>% # n = 2 for bigrams etc, n=1 for most popular word
@@ -411,24 +587,40 @@ ai_corpus_fourgram <- ai_corpus_with_stopwords %>%
 ai_corpus_fourgram <- head(ai_corpus_fourgram, n = 10)
 
 ggplot(ai_corpus_fourgram, aes(y = reorder(fourgram, n), x = n)) +
-  geom_bar(stat="identity") +
-  geom_text(aes(label = format(round(n, digits = 0))), vjust=0.5, hjust=-0.25) +
-  theme_minimal()
-
-# To do: Show fourgrams in context?
+  geom_bar(stat="identity", fill = "#8aabfd") +
+  geom_text(aes(label = format(round(n, digits = 0))), size = 2.5, vjust=0.5, hjust=-0.25) +
+  ylab(" ") +
+  xlab(" ") +
+  theme_minimal() +
+  theme(panel.grid.major.y = element_blank(), # remove the vertical grid lines
+        panel.grid.major.x = element_line(size=.1, color="black" ))
 ```
 
-## 10 ungewöhnliche Wörter
-```{r Ngrams: Unusual Words}
-# Ie words that occur only once in the corpus
-sample(ai_corpus_unusual$unigram, 10)
+### 15 Ungewöhnliche Wörter
+
+```{r}
 ai_corpus_unusual_size <- nrow(ai_corpus_unusual)
+unusual_share <- round((ai_corpus_unusual_size / total_wc)*100, 2)
 ```
-- Ungewöhnlich = erscheinen nur 1 Mal
-- Anzahl Wörter, die nur 1 Mal erscheinen: ai_corpus_unusual_size
 
+Wörter, die nur 1x erscheinen. Insgesamt erscheinen `r ai_corpus_unusual_size` Wörter nur 1 Mal in der Textsammlung (`r unusual_share`% aller Wörter).
+
+```{r Ngrams: Unusual Words, cache=T, results='asis'}
+unusual_words <- sample(ai_corpus_unusual$unigram, 15)
+unusual_words <- as.data.frame(unusual_words)
+
+kable(unusual_words, "html", col.names = c("Ungewöhnliche Wörter")) %>%
+  kable_styling("striped")
+
+# stargazer(unusual_words,
+#           summary = F,
+#           type = "html",
+#           rownames = FALSE,
+#           column.labels = c("Ungewöhnliche Wörter"))
+```
+
+```{r Longest Word, eval=FALSE, include=FALSE, cache=T}
 ## Textanalyse: Wortlänge
-```{r Longest Word}
 # List all unqiue words
 # see Unigram Graph
 
@@ -437,14 +629,12 @@ ai_corpus_unique_words <- ai_corpus_unique_words %>%
   mutate(char_len = nchar(unigram)) %>% 
   arrange(desc(char_len))
 # lotta noise, slightly pointless
-
 # Show top n long words
-
 ```
 
+## Textanalse: Wort- und Satzlänge
 
-## Textanalse: Satzlänge
-```{r Average Sentence Length of each article}
+```{r Average Sentence Length of each article, cache=T}
 # Function to measure average sentence length
 measure_avg_sentence_length <- function(text) {
   # Split the text into sentences
@@ -464,33 +654,92 @@ ai_clean <- ai_clean %>%
 ai_clean$avg_sent_len <- as.numeric(ai_clean$avg_sent_len)
 ```
 
-```{r Average Sentence Length over time}
+### Anzahl Wörter pro Artikel vs. Durchschnittliche Wortlänge pro Artikel
+
+```{r cache=T}
+ai_clean <- ai_clean %>% mutate(avg_word_len = ((tx_clean_nchar - word_count) / word_count))
+
+ggplot(ai_clean, aes(x = word_count, y = avg_word_len, color = rubrik_graph)) +
+  geom_point(size = 2, alpha = 0.5) +
+  xlab("Anzahl Wörter pro Artikel") +
+  ylab("Durchschnittliche Wortlänge des Artikels") +
+  scale_color_manual(values = c("#8aabfd", "#4fbbae", "#374e8e", "#ac004f", "#df7c18", "#e3b13e")) +
+  theme_minimal() +
+  guides(color = guide_legend(nrow = 1)) +
+  theme(panel.grid.major.x = element_line(size=.1, color="black"),
+        panel.grid.minor.x = element_blank(), # remove the vertical grid lines
+        panel.grid.major.y = element_line(size=.1, color="black"),
+        legend.position="bottom",
+        legend.title=element_blank())
+```
+
+### Min, Max und Median Satzlängen Pro Jahr
+
+```{r Average Sentence Length over time, cache=T}
 sent_len_over_time <- ai_clean %>% 
-  select(pubDate, avg_sent_len, rubrik) %>% 
-  mutate(year = format(pubDate, format="%Y"))
+  select(pubDate, avg_sent_len, rubrik, year, rubrik_graph)
 
 sent_len_over_time$avg_sent_len <- as.numeric(sent_len_over_time$avg_sent_len)
 
 ggplot(sent_len_over_time, aes(x = year, y = avg_sent_len, group = year)) +
-  geom_boxplot(coef = 10)
+  geom_boxplot(coef = 10, fill = "#8aabfd") +
+  ylab(" ") +
+  xlab(" ") +
+  theme_minimal() +
+  scale_x_continuous(expand = c(0, 0.5), breaks = pretty_breaks(n = 15)) +
+  theme(panel.grid.major.x = element_blank(), # remove the vertical grid lines
+        panel.grid.minor.x = element_blank(), # remove the vertical grid lines
+        panel.grid.major.y = element_line(size=.1, color="black"),
+        legend.position="bottom",
+        legend.title=element_blank())
 ```
 
+### Durchschnittliche Satzlänge pro Jahr pro Rubrik
 
-```{r Average Sentence Length over time by Rubrik}
+```{r Average Sentence Length over time by Rubrik, message=FALSE, warning=FALSE, cache=TRUE}
 top_rubrik <- c("Ausland", "Wirtschaft", "Börse und Märkte", "Inland", "Reflexe", "Unternehmenspraxis")
 
 sent_len_by_rubik <- sent_len_over_time %>% 
-  group_by(year, rubrik) %>% 
-  dplyr::summarize(len_mean = mean(avg_sent_len, na.rm=TRUE)) %>% 
-  filter(rubrik %in% top_rubrik)
+  group_by(year, rubrik_graph) %>% 
+  dplyr::summarize(len_mean = mean(avg_sent_len, na.rm=TRUE))
 
-ggplot(sent_len_by_rubik, aes(x = year, y = len_mean, group = rubrik)) +
-  geom_line(aes(color=rubrik))
+ggplot(sent_len_by_rubik, aes(x = year, y = len_mean, group = rubrik_graph)) +
+  geom_line(aes(color = rubrik_graph)) +
+  geom_point(aes(color = rubrik_graph)) +
+  ylab(" ") +
+  xlab(" ") +
+  scale_color_manual(values = c("#8aabfd", "#4fbbae", "#374e8e", "#ac004f", "#df7c18", "#e3b13e")) +
+  theme_minimal() +
+  guides(color = guide_legend(nrow = 1)) +
+  scale_x_continuous(expand = c(0, 0.5), breaks = pretty_breaks(n = 15)) +
+  theme(panel.grid.major.x = element_blank(), # remove the vertical grid lines
+        panel.grid.minor.x = element_blank(), # remove the vertical grid lines
+        panel.grid.major.y = element_line(size=.1, color="black"),
+        legend.position="bottom",
+        legend.title=element_blank())
+```
+
+### Wortlänge vs Durchschnittliche Satzlänge
+
+```{r cache=T}
+ggplot(ai_clean, aes(x = word_count, y = avg_sent_len, color = rubrik_graph)) +
+  geom_point(size = 2, alpha = 0.5) +
+  ylab("Durchschnittliche Satzlänge des Artikels") +
+  xlab("Anzahl Wörter pro Artikel") +
+  scale_color_manual(values = c("#8aabfd", "#4fbbae", "#374e8e", "#ac004f", "#df7c18", "#e3b13e")) +
+  theme_minimal() +
+  guides(color = guide_legend(nrow = 1)) +
+  theme(panel.grid.major.x = element_line(size=.1, color="black"),
+        panel.grid.minor.x = element_blank(), # remove the vertical grid lines
+        panel.grid.major.y = element_line(size=.1, color="black"),
+        legend.position="bottom",
+        legend.title=element_blank())
 ```
 
 
+
+```{r Articles with at least one Unwort, eval=FALSE, warning=FALSE, include=FALSE, cache=T}
 ## Textanalyse: Unwörter
-```{r Articles with at least one Unwort, eval=FALSE, warning=FALSE, include=FALSE}
 unwoerter <- c("beinhaltet", "beinhalten", "Dunkelziffer", "schlussendlich")
 
 unwoerter_corpus <- ai_clean %>%
@@ -498,11 +747,12 @@ unwoerter_corpus <- ai_clean %>%
   mutate(unwort = str_detect(tx_clean, unwoerter))
 
 summary(unwoerter_corpus$unwort)
+#Talks the talk, walks the walk: Keiner der Artikel beinhalten Unwörter. «Dunkelziffer» erscheint nur 1 Mal, und zwar in einem Aritkel über den Begriff «Dunkelziffer».
 ```
-- Talks the talk, walks the walk: Keiner der Artikel beinhalten Unwörter. «Dunkelziffer» erscheint nur 1 Mal, und zwar in einem Aritkel über den Begriff «Dunkelziffer».
 
-## Textanalyse: Gendergerechte Sprache
+
 ```{r eval=FALSE, include=FALSE}
+## Textanalyse: Gendergerechte Sprache
 gender_words <- c("innen")
 
 gender_corpus <- ai_clean %>%
@@ -518,14 +768,14 @@ ggplot(gender_corpus, aes(x = year, y = n)) +
 # not working as intended yet
 ```
 
-## Textanalyse: Anglizismen
 ```{bash eval=FALSE, include=FALSE}
+## Textanalyse: Anglizismen
 # Search and replace in anglizismen_02.csv
 sed -i'' -e 's/"/ /g' anglizismen_02.csv
 sed -i'' -e 's/ ,  /\n/g' anglizismen_02.csv
 ```
 
-```{r}
+```{r eval=FALSE, include=FALSE}
 anglizismen <- readLines("anglizismen_02.csv")
 anglizismen <- tolower(anglizismen)
 anglizismen <- paste(anglizismen, collapse = "|")
@@ -537,12 +787,578 @@ anglizismen_corpus$tx_clean <- tolower(anglizismen_corpus$tx_clean)
 
 anglizismen_corpus <- anglizismen_corpus %>%
   filter(!str_detect(tx_clean, anglizismen))
+# Aus einer Liste von 4724 Anglizismen [<https://de.wiktionary.org/wiki/Verzeichnis:Deutsch/Anglizismen>], werden nur ganz wenige verwendet
 ```
-- Aus einer Liste von 4724 Anglizismen [https://de.wiktionary.org/wiki/Verzeichnis:Deutsch/Anglizismen], werden nur ganz wenige verwendet
+
+## Anzahl Frage- und Ausrufezeichen pro Jahr
+
+```{r cache=T}
+fragezeichen <- c("\\?")
+ausrufezeichen <- c("\\!")
+
+fragezeichen_corpus <- ai_clean %>%
+  select(pubDate, ht, rubrik, tx_clean, year) %>% 
+  filter(str_detect(tx_clean, fragezeichen)) %>% 
+  count(year)
+
+ausrufezeichen_corpus <- ai_clean %>%
+  select(pubDate, ht, rubrik, tx_clean, year) %>% 
+  filter(str_detect(tx_clean, ausrufezeichen)) %>% 
+  count(year)
+
+satzzeichen_corpus <- fragezeichen_corpus %>% 
+  left_join(ausrufezeichen_corpus, by = "year") %>% 
+  rename("Fragezeichen" = n.x) %>% 
+  rename("Ausrufezeichen" = n.y) %>% 
+  pivot_longer("Fragezeichen":"Ausrufezeichen")
+
+satzzeichen_corpus[is.na(satzzeichen_corpus)] <- 0
+
+ggplot(satzzeichen_corpus, aes(x = year, y = value, group = name)) +
+  geom_line(aes(color = name)) +
+  geom_point(aes(color = name)) +
+  ylim(0, 80) +
+  ylab(" ") +
+  xlab(" ") +
+  scale_color_manual(values = c("#8aabfd", "#4fbbae", "#374e8e", "#ac004f", "#df7c18", "#e3b13e")) +
+  theme_minimal() +
+  guides(color = guide_legend(nrow = 1)) +
+  scale_x_continuous(expand = c(0, 0.5), breaks = pretty_breaks(n = 15)) +
+  theme(panel.grid.major.x = element_blank(), # remove the vertical grid lines
+        panel.grid.minor.x = element_blank(), # remove the vertical grid lines
+        panel.grid.major.y = element_line(size=.1, color="black"),
+        legend.position="bottom",
+        legend.title=element_blank())
+```
+
+## Ausgewählte Firmen
+Anzahl Erwähnungen pro Jahr
+
+```{r cache=T}
+firmen_corpus <- ai_clean %>%
+  select(pubDate, tx_clean, year) %>% 
+  mutate(migros = str_detect(tx_clean, "Migros")) %>% 
+  mutate(coop = str_detect(tx_clean, "Coop")) %>% 
+  mutate(denner = str_detect(tx_clean, "Denner")) %>% 
+  mutate(novartis = str_detect(tx_clean, "Novartis")) %>% 
+  mutate(roche = str_detect(tx_clean, "Roche")) %>% 
+  mutate(lonza = str_detect(tx_clean, "Lonza"))
+
+migros_corpus <- firmen_corpus %>% 
+  select(pubDate, migros, year) %>% 
+  filter(migros == T) %>% 
+  count(year, name = "Migros")
+
+coop_corpus <- firmen_corpus %>% 
+  select(pubDate, coop, year) %>% 
+  filter(coop == T) %>% 
+  count(year, name = "Coop")
+
+denner_corpus <- firmen_corpus %>% 
+  select(pubDate, denner, year) %>% 
+  filter(denner == T) %>% 
+  count(year, name = "Denner")
+
+novartis_corpus <- firmen_corpus %>% 
+  select(pubDate, novartis, year) %>% 
+  filter(novartis == T) %>% 
+  count(year, name = "Novartis")
+
+roche_corpus <- firmen_corpus %>% 
+  select(pubDate, roche, year) %>% 
+  filter(roche == T) %>% 
+  count(year, name = "Roche")
+
+lonza_corpus <- firmen_corpus %>% 
+  select(pubDate, lonza, year) %>% 
+  filter(lonza == T) %>% 
+  count(year, name = "Lonza")
+
+firmen_df <- data.frame(year = 1994:2021)
+#firmen_df$year <- as.character(firmen_df$year)
+                        
+firmen_df <- firmen_df %>% 
+  left_join(migros_corpus, by = "year") %>% 
+  left_join(coop_corpus, by = "year") %>% 
+  #left_join(denner_corpus, by = "year") %>% 
+  left_join(novartis_corpus, by = "year") %>% 
+  left_join(roche_corpus, by = "year") %>% 
+  #left_join(lonza_corpus, by = "year") %>% 
+  pivot_longer("Migros":"Roche")
+
+firmen_df[is.na(firmen_df)] <- 0
+
+ggplot(firmen_df, aes(x = year, y = value, group = name)) +
+  geom_line(aes(color = name)) +
+  geom_point(aes(color = name)) +
+  ylab(" ") +
+  xlab(" ") +
+  scale_color_manual(values = c("#8aabfd", "#4fbbae", "#374e8e", "#ac004f", "#df7c18", "#e3b13e")) +
+  theme_minimal() +
+  guides(color = guide_legend(nrow = 1)) +
+  scale_x_continuous(expand = c(0, 0.5), breaks = pretty_breaks(n = 15)) +
+  theme(panel.grid.major.x = element_blank(), # remove the vertical grid lines
+        panel.grid.minor.x = element_blank(), # remove the vertical grid lines
+        panel.grid.major.y = element_line(size=.1, color="black"),
+        legend.position="bottom",
+        legend.title=element_blank())
+```
+
+## Ausgewählte Ortschaften
+Anzahl Erwähnungen pro Jahr
+
+```{r cache=T}
+ortschaften_corpus <- ai_clean %>%
+  select(pubDate, tx_clean, year) %>% 
+  mutate(schweiz = str_detect(tx_clean, "Schweiz")) %>% 
+  mutate(schweden = str_detect(tx_clean, "Schweden")) %>% 
+  mutate(italien = str_detect(tx_clean, "Italien")) %>% 
+  mutate(basel = str_detect(tx_clean, "Basel")) %>% 
+  mutate(zurich = str_detect(tx_clean, "Zürich"))
+
+schweiz_corpus <- ortschaften_corpus %>% 
+  select(pubDate, schweiz, year) %>% 
+  filter(schweiz == T) %>% 
+  count(year, name = "Schweiz")
+
+schweden_corpus <- ortschaften_corpus %>% 
+  select(pubDate, schweden, year) %>% 
+  filter(schweden == T) %>% 
+  count(year, name = "Schweden")
+
+italien_corpus <- ortschaften_corpus %>% 
+  select(pubDate, italien, year) %>% 
+  filter(italien == T) %>% 
+  count(year, name = "Italien")
+
+basel_corpus <- ortschaften_corpus %>% 
+  select(pubDate, basel, year) %>% 
+  filter(basel == T) %>% 
+  count(year, name = "Basel")
+
+zurich_corpus <- ortschaften_corpus %>% 
+  select(pubDate, zurich, year) %>% 
+  filter(zurich == T) %>% 
+  count(year, name = "Zürich")
+
+ortschaften_df <- data.frame(year = 1994:2020)
+#ortschaften_df$year <- as.character(ortschaften_df$year)
+                        
+ortschaften_df <- ortschaften_df %>% 
+  left_join(schweiz_corpus, by = "year") %>% 
+  left_join(schweden_corpus, by = "year") %>% 
+  left_join(italien_corpus, by = "year") %>% 
+  left_join(basel_corpus, by = "year") %>% 
+  left_join(zurich_corpus, by = "year") %>% 
+  pivot_longer("Schweiz":"Zürich")
+
+ortschaften_df[is.na(ortschaften_df)] <- 0
+
+ggplot(ortschaften_df, aes(x = year, y = value, group = name)) +
+  geom_line(aes(color = name)) +
+  geom_point(aes(color = name)) +
+  ylab(" ") +
+  xlab(" ") +
+  scale_color_manual(values = c("#8aabfd", "#4fbbae", "#374e8e", "#ac004f", "#df7c18", "#e3b13e")) +
+  theme_minimal() +
+  guides(color = guide_legend(nrow = 1)) +
+  scale_x_continuous(expand = c(0, 0.5), breaks = pretty_breaks(n = 15)) +
+  theme(panel.grid.major.x = element_blank(), # remove the vertical grid lines
+        panel.grid.minor.x = element_blank(), # remove the vertical grid lines
+        panel.grid.major.y = element_line(size=.1, color="black"),
+        legend.position="bottom",
+        legend.title=element_blank())
+```
+
+```{r eval=FALSE, include=FALSE}
+## Topic Modelling
+# dtm <- ai_clean$ht
+# 
+# dtm <- DocumentTermMatrix(ai_corpus_no_stopwords)
+# ai_lda <- LDA(dtm, k = 10)
+# 
+# ai_topics <- tidy(ai_lda, matrix = "beta")
+# ai_topics
+# 
+# ai_top_terms <- ai_topics %>%
+#   group_by(topic) %>%
+#   slice_max(beta, n = 10) %>% 
+#   ungroup() %>%
+#   arrange(topic, -beta)
+# 
+# ai_top_terms %>%
+#   mutate(term = reorder_within(term, beta, topic)) %>%
+#   ggplot(aes(beta, term, fill = factor(topic))) +
+#   geom_col(show.legend = FALSE) +
+#   facet_wrap(~ topic, scales = "free") +
+#   scale_y_reordered()
+
+custom_stop_words_titles <- c("ein", "\\-", "\\–", "einen", "eine", "\\—", "\\–")
+more_stop_words <- c("mehr", "fr\\.", "mio\\.", "mrd.", "wie", "--", "unternehmen", "dass", "die", "das", "unternehmen")
+
+# Convert the text column to a corpus
+#head(ai_clean$tx_clean)
+
+# Lemmatisation
+library(udpipe)
+# load the pre-trained German model
+model <- udpipe_download_model(language = "german")
+# create an udpipe object
+ud_model <- udpipe_load_model(file = model$file_model)
+# Perform lemmatisation
+# ai_clean <- ai_clean %>% 
+#   mutate(ht_lemmatised = paste(as.data.frame(udpipe_annotate(ud_model, x = ai_clean$ht))$lemma, collapse = " "))
+
+for (x in 1:nrow(ai_clean)) {
+  ai_clean$ht_lemmatised[x] <- paste(as.data.frame(udpipe_annotate(ud_model, x = ai_clean$ht[x]))$lemma, collapse = " ")
+}
+
+for (x in 1:nrow(ai_clean)) {
+  ai_clean$tx_lemmatised[x] <- paste(as.data.frame(udpipe_annotate(ud_model, x = ai_clean$tx_clean[x]))$lemma, collapse = " ")
+} # not sure this finished completely, maybe redo and add a counter? maybe also just try head
 
 
-## Archiv
+#ai_clean$ht_lemmatised_clean <- gsub('–', '', ai_clean$ht_lemmatised)
+#ai_titles <- Corpus(VectorSource(ai_clean$ht_lemmatised_clean))
+ai_clean$tx_lemmatised_ultra_clean <- gsub('–', '', ai_clean$tx_lemmatised)
+ai_titles <- Corpus(VectorSource(ai_clean$tx_lemmatised_ultra_clean))
+
+# Remove stopwords using the tm library's tm_map function
+ai_titles_no_stopwords <- tm_map(ai_titles, removeWords, stopwords("german"))
+ai_titles_no_stopwords <- tm_map(ai_titles_no_stopwords, content_transformer(tolower))
+ai_titles_no_stopwords <- tm_map(ai_titles_no_stopwords, removeNumbers)
+
+ai_titles_no_stopwords <- tm_map(ai_titles_no_stopwords, removeWords, custom_stop_words)
+ai_titles_no_stopwords <- tm_map(ai_titles_no_stopwords, removeWords, error_words)
+ai_titles_no_stopwords <- tm_map(ai_titles_no_stopwords, removeWords, custom_stop_words_titles)
+ai_titles_no_stopwords <- tm_map(ai_titles_no_stopwords, removeWords, c("mehr", "fr.", "mio.", "mrd.", "wie", "--", "unternehmen", "dass", "die", "das", "unternehmen", "fr.", "–", "jahr", "jahren", "seit", "und", "beim", "wohl", "mit", "mit", "jedoch", "nach", "zwei", "bereits", "allerdings", "immer", "auch", "sowie", "für", "sei", "schliesslich", "darauf", "indessen", "zwei", "drei", "(.)", "\\(vgl.", "geht", "kaum", "etwa", "fall", "neuen", "beiden", " ", "letzten", "gut", "etwa", "weitere", "rund", "gegenüber", "dank"))
+ai_titles_no_stopwords <- tm_map(ai_titles_no_stopwords, removeWords, c("fr", "fr.", " fr", " fr.", "fr ", "fr. "))
+ai_titles_no_stopwords <- tm_map(ai_titles_no_stopwords, removeWords, c("mio", "mio.", " mio", " mio.", "mio ", "mio. "))
+ai_titles_no_stopwords <- tm_map(ai_titles_no_stopwords, removeWords, c("mrd", "mrd.", " mrd", " mrd.", "mrd ", "mrd. "))
+ai_titles_no_stopwords <- tm_map(ai_titles_no_stopwords, removeWords, c("–", "–.", " –", " –.", "– ", "–. "))
+ai_titles_no_stopwords <- tm_map(ai_titles_no_stopwords, removeWords, c("–", "–.", " –", " –.", "– ", "–. "))
+ai_titles_no_stopwords <- data.frame(text = sapply(ai_titles_no_stopwords, as.character), stringsAsFactors = FALSE)
+#ai_titles_no_stopwords$text <- as.character(ai_titles_no_stopwords$text)
+
+#ai_titles_no_stopwords <- tm_map(ai_titles_no_stopwords, PlainTextDocument)
+dtm_titles <- DocumentTermMatrix(ai_titles_no_stopwords, control = list(removePunctuation = TRUE))
+
+lda_titles <- LDA(dtm_titles, k = 20)
+
+ai_topics_titles <- tidy(lda_titles, matrix = "beta")
+
+ai_top_terms_titles <- ai_topics_titles %>%
+  group_by(topic) %>%
+  slice_max(beta, n = 10) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+#ai_top_terms_titles
+
+ai_top_terms_titles %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(beta, term, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  scale_y_reordered()
+```
+
+## Wortschatz
+### Anzahl Wörter pro Artikel vs Anzahl einzigartiger Wörter pro Artikel
+
+```{r cache=T}
+vocabulary <- ai_clean %>% 
+  select(pubDate, tx_clean, word_count, tx_clean_nchar, year, rubrik_graph) 
+
+vocabulary$tx_clean <- tolower(vocabulary$tx_clean)
+
+for (x in 1:nrow(vocabulary)) {
+  vocabulary$vocab_size[x] <- length(unique(unlist(strsplit(tolower(vocabulary$tx_clean[x]), " "))))
+}
+
+ggplot(vocabulary, aes(x = word_count, y = vocab_size, color = rubrik_graph)) +
+  geom_point(size = 2, alpha = 0.5) +
+  xlab("Anzahl Wörter pro Artikel") +
+  ylab("Anzahl einzigartiger Wörter pro Artikel") +
+  scale_color_manual(values = c("#8aabfd", "#4fbbae", "#374e8e", "#ac004f", "#df7c18", "#e3b13e")) +
+  theme_minimal() +
+  guides(color = guide_legend(nrow = 1)) +
+  theme(panel.grid.major.x = element_line(size=.1, color="black"),
+        panel.grid.minor.x = element_blank(), # remove the vertical grid lines
+        panel.grid.major.y = element_line(size=.1, color="black"),
+        legend.position="bottom",
+        legend.title=element_blank())
+```
+
+### Wortschatzgrösse pro Jahr
+
+```{r cache=T}
+ggplot(vocabulary, aes(x = year, y = vocab_size, group = year)) +
+  geom_boxplot(coef = 10, fill = "#4fbbae") +
+  ylab(" ") +
+  xlab(" ") +
+  theme_minimal() +
+  scale_x_continuous(expand = c(0, 0.5), breaks = pretty_breaks(n = 15)) +
+  theme(panel.grid.major.x = element_blank(), # remove the vertical grid lines
+        panel.grid.minor.x = element_blank(), # remove the vertical grid lines
+        panel.grid.major.y = element_line(size=.1, color="black"),
+        legend.position="bottom",
+        legend.title=element_blank())
+```
+
+## Ähnliche Titel
+
+```{r cache=T, results='asis'}
+titles <- ai_clean %>% 
+  select(pubDate, ht) %>% 
+  mutate(ht = tolower(ht)) %>% 
+  mutate(ht_nchar = nchar(ht))
+
+similar_titles <- data.frame(Titel  = NA)
+
+titles_nchar40 <- titles %>% filter(ht_nchar == 40)
+titles_nchar40 <- titles_nchar40$ht
+similar_titles <- similar_titles %>% add_row(Titel = titles_nchar40[233])
+similar_titles <- similar_titles %>% add_row(Titel = titles_nchar40[250])
+similar_titles <- similar_titles %>% add_row(Titel = " ")
+similar_titles <- similar_titles %>% add_row(Titel = titles_nchar40[264])
+similar_titles <- similar_titles %>% add_row(Titel = titles_nchar40[265])
+similar_titles <- similar_titles %>% add_row(Titel = " ")
+
+titles_nchar42 <- titles %>% filter(ht_nchar == 42)
+titles_nchar42 <- titles_nchar42$ht
+similar_titles <- similar_titles %>% add_row(Titel = titles_nchar42[15])
+similar_titles <- similar_titles %>% add_row(Titel = titles_nchar42[19])
+similar_titles <- similar_titles %>% add_row(Titel = " ")
+similar_titles <- similar_titles %>% add_row(Titel = titles_nchar42[87])
+similar_titles <- similar_titles %>% add_row(Titel = titles_nchar42[114])
+similar_titles <- similar_titles %>% add_row(Titel = " ")
+
+titles_nchar33 <- titles %>% filter(ht_nchar == 33)
+titles_nchar33 <- titles_nchar33$ht
+similar_titles <- similar_titles %>% add_row(Titel = titles_nchar33[65])
+similar_titles <- similar_titles %>% add_row(Titel = titles_nchar33[91])
+similar_titles <- similar_titles %>% add_row(Titel = " ")
+similar_titles <- similar_titles %>% add_row(Titel = titles_nchar33[127])
+similar_titles <- similar_titles %>% add_row(Titel = titles_nchar33[77])
+similar_titles <- similar_titles %>% add_row(Titel = " ")
+similar_titles <- similar_titles %>% add_row(Titel = titles_nchar33[12])
+similar_titles <- similar_titles %>% add_row(Titel = titles_nchar33[164])
+similar_titles <- similar_titles %>% add_row(Titel = " ")
+
+titles_nchar43 <- titles %>% filter(ht_nchar == 43)
+titles_nchar43 <- titles_nchar43$ht
+similar_titles <- similar_titles %>% add_row(Titel = titles_nchar43[2])
+similar_titles <- similar_titles %>% add_row(Titel = titles_nchar43[3])
+similar_titles <- similar_titles %>% add_row(Titel = " ")
+
+titles_nchar41 <- titles %>% filter(ht_nchar == 41)
+titles_nchar41 <- titles_nchar41$ht
+similar_titles <- similar_titles %>% add_row(Titel = titles_nchar41[103])
+similar_titles <- similar_titles %>% add_row(Titel = titles_nchar41[107])
+similar_titles <- similar_titles %>% add_row(Titel = " ")
+
+titles_nchar39 <- titles %>% filter(ht_nchar == 39)
+titles_nchar39 <- titles_nchar39$ht
+similar_titles <- similar_titles %>% add_row(Titel = titles_nchar39[127])
+similar_titles <- similar_titles %>% add_row(Titel = titles_nchar39[169])
+similar_titles <- similar_titles %>% add_row(Titel = " ")
+
+titles_nchar34 <- titles %>% filter(ht_nchar == 34)
+titles_nchar34 <- titles_nchar34$ht
+similar_titles <- similar_titles %>% add_row(Titel = titles_nchar34[51])
+similar_titles <- similar_titles %>% add_row(Titel = titles_nchar34[104])
+similar_titles <- similar_titles %>% add_row(Titel = " ")
+similar_titles <- similar_titles %>% add_row(Titel = titles_nchar34[175])
+similar_titles <- similar_titles %>% add_row(Titel = titles_nchar34[185])
+similar_titles <- similar_titles %>% add_row(Titel = " ")
+
+titles_nchar51_53 <- titles %>% filter(ht_nchar >= 51 & ht_nchar <= 53)
+titles_nchar51_53 <- titles_nchar51_53$ht
+similar_titles <- similar_titles %>% add_row(Titel = titles_nchar51_53[102])
+similar_titles <- similar_titles %>% add_row(Titel = titles_nchar51_53[103])
+similar_titles <- similar_titles %>% add_row(Titel = " ")
+
+titles_nchar50_53 <- titles %>% filter(ht_nchar >= 50 & ht_nchar <= 53)
+titles_nchar50_53 <- titles_nchar50_53$ht
+similar_titles <- similar_titles %>% add_row(Titel = titles_nchar50_53[29])
+similar_titles <- similar_titles %>% add_row(Titel = titles_nchar50_53[151])
+similar_titles <- similar_titles %>% add_row(Titel = " ")
+
+titles_nchar24_25 <- titles %>% filter(ht_nchar >= 24 & ht_nchar <= 25)
+titles_nchar24_25 <- titles_nchar24_25$ht
+similar_titles <- similar_titles %>% add_row(Titel = titles_nchar24_25[98])
+similar_titles <- similar_titles %>% add_row(Titel = titles_nchar24_25[241])
+similar_titles <- similar_titles %>% add_row(Titel = " ")
+
+titles_nchar20_22 <- titles %>% filter(ht_nchar >= 20 & ht_nchar <= 22)
+titles_nchar20_22 <- titles_nchar20_22$ht
+similar_titles <- similar_titles %>% add_row(Titel = titles_nchar20_22[94])
+similar_titles <- similar_titles %>% add_row(Titel = titles_nchar20_22[130])
+similar_titles <- similar_titles %>% add_row(Titel = " ")
+similar_titles <- similar_titles %>% add_row(Titel = titles_nchar20_22[111])
+similar_titles <- similar_titles %>% add_row(Titel = titles_nchar20_22[151])
+similar_titles <- similar_titles %>% add_row(Titel = " ")
+similar_titles <- similar_titles %>% add_row(Titel = " ")
+# similar_titles <- similar_titles %>% add_row(Titel = " ")
+# similar_titles <- similar_titles %>% add_row(Titel = " ")
+
+title_merge <- ai_clean %>% 
+  select(ht, pubDate) %>% 
+  rename("Titel" = ht)
+
+title_merge$Titel <- tolower(title_merge$Titel)
+
+similar_titles_table <- similar_titles %>% 
+  left_join(title_merge, by = "Titel") %>% 
+  rename("Datum" = pubDate) %>% 
+  mutate(Datum = format(Datum, "%d %B %Y"))
+
+#similar_titles_table[, 1] <- gsub("&", "\t\b&", similar_titles_table[, 1])
+similar_titles_table[is.na(similar_titles_table)] <- " "
+similar_titles_table <- similar_titles_table[-1,]
+rownames(similar_titles_table) <- NULL
+
+
+# stargazer(similar_titles_table,
+#           summary = F,
+#           #type = "html",
+#           rownames = FALSE,
+#           align = T)
+
+kable(similar_titles_table, "html") %>%
+  kable_styling("striped")
+
+# titles_nchar_u20 <- titles %>% filter(ht_nchar <= 20)
+# titles_nchar_u20 <- titles_nchar_u20$ht
+# #titles_nchar_u20[67]
+# titles_nchar_u20[112]
+# titles_nchar_u20[140]
+# #titles_nchar_u20[146]
+# #titles_nchar_u20[158]
+# titles_nchar_u20[196]
+# #titles_nchar_u20[218]
+# titles_nchar_u20[221]
+
+# titles_nchar_u21 <- titles %>% filter(ht_nchar <= 21)
+# titles_nchar_u21 <- titles_nchar_u21$ht
+
+# list_of_titles <- list_of_titles[-19]
+# list_of_titles <- list_of_titles[-30]
+# list_of_titles <- list_of_titles[-45]
+# list_of_titles <- list_of_titles[-21]
+
+# calculate the Levenshtein distance between all pairs of strings
+# dist_matrix <- adist(titles_nchar_u21)
+# dist_matrix <- as.data.frame(dist_matrix)
+# dist_matrix[dist_matrix == 0] <- NA
+
+# smallest_ld <- min(dist_matrix, na.rm=T)
+
+#dist_matrix %>% filter_all(any_vars(. %in% smallest_ld))
+
+# dist_matrix <- dist_matrix %>% filter_all(any_vars(. %in% smallest_ld))
+# dist_matrix <- t(dist_matrix)
+# dist_matrix <- as.data.frame(dist_matrix)
+# dist_matrix <- dist_matrix %>% filter_all(any_vars(. %in% smallest_ld))
+# dist_matrix
+```
+
+
+```{r eval=FALSE, include=FALSE}
+## Word Embeddings
+library(word2vec)
+library(uwot)
+library(ggrepel)
+set.seed(123456789)
+
+?word2vec
+
+x <- tolower(ai_clean$ht)
+model <- word2vec(x = x, type = "cbow", dim = 5, iter = 100)
+#model <- word2vec(x = x, type = "cbow", dim = 30, iter = 30)
+embedding <- as.matrix(model)
+
+# embedding <- predict(model, c("novartis", "roche"), type = "embedding")
+# lookslike <- predict(model, c("novartis", "roche"), type = "nearest", top_n = 5)
+# lookslike
+
+viz <- umap(embedding, n_neighbors = 10, n_threads = 2)
+
+## Static plot
+df  <- data.frame(word = gsub("//.+", "", rownames(embedding)), 
+                  xpos = gsub(".+//", "", rownames(embedding)), 
+                  x = viz[, 1], y = viz[, 2], 
+                  stringsAsFactors = FALSE)
+
+# for (x in 1:nrow(df)) {
+#   df$pos[x] <- as.data.frame(udpipe_annotate(ud_model, x = df$word))$upos[x]
+# }
+#df <- subset(df, pos %in% c("NOUN"))
+
+ggplot(df, aes(x = x, y = y, label = word)) + 
+  #geom_text_repel(max.overlaps = 100) + 
+  #geom_label_repel(max.overlaps = 100, size = 0.5) + 
+  geom_text()# + 
+  #geom_point() +
+  #theme_void() + 
+  #labs(title = "word2vec - adjectives in 2D using UMAP")
+#p
+
+#ggsave("word2vec_test.png")
+
+ggsave(
+  "word2vec_test.png",
+  plot = p,
+  path = "img/",
+  scale = 8,
+  width = 15,
+  height = 8,
+  units = "cm",
+  bg = NULL,
+)
+
+test_tokens <- udpipe_annotate(ud_model, x = df$word)
+test_tokens <- as.data.frame(test_tokens)
+View(test_tokens)
+
+test_tokens <- as.data.frame(udpipe_annotate(ud_model, x = df$word))$upos
+
+## Interactive plot
+#library(plotly)
+#plot_ly(df, x = ~x, y = ~y, type = "scatter", mode = 'text', text = ~word)
+```
+
+
+```{r eval=FALSE, include=FALSE}
+## Gender in der Sprache
+#if you have enough time in the end
+# load the pre-trained German model
+model <- udpipe_download_model(language = "german")
+
+# create an udpipe object
+ud_model <- udpipe_load_model(file = model$file_model)
+
+tx_list <- sample(ai_clean$tx_clean, 100)
+tx_tokens <- udpipe_annotate(ud_model, x = tx_list)
+tx_tokens <- as.data.frame(tx_tokens)
+
+tx_tokens <- tx_tokens %>%
+  filter(upos == "NOUN") %>% 
+  mutate(gender = case_when(str_detect(feats, "Masc") ~ "m",
+                            str_detect(feats, "Fem") ~ "f",
+                            str_detect(feats, "Neut") ~ "n")) %>%
+  select(doc_id, gender) %>% 
+  count(doc_id, gender) %>% 
+  na.omit() %>% 
+  pivot_wider(names_from = gender, values_from = n) %>% 
+  mutate(temp_id = row_number())
+
+View(tx_tokens)
+```
+
 ```{r Archive, eval=FALSE, include=FALSE}
+## Archiv
 # Clean Sections
 #length(unique(ai_clean$ru)) # 64
 
@@ -566,4 +1382,3 @@ anglizismen_corpus <- anglizismen_corpus %>%
 #   select(rubrik) %>% 
 #   distinct(rubrik)
 ```
-
