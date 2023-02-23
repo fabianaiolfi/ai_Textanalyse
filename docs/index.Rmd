@@ -18,6 +18,7 @@ library(scales)
 library(doc2vec)
 #library(stargazer)
 library(kableExtra)
+library(ggrepel)
 setwd(here())
 ```
 
@@ -220,7 +221,7 @@ ggplot(section_over_time, aes(x=year, y=n, fill=rubrik_graph)) +
 ```{r, fig.height=10, cache=T}
 # Document Embeddings
 embeddings_clean <- ai_clean %>% 
-  select(id, tx_clean, rubrik_graph, year)
+  select(id, tx_clean, rubrik_graph, year, ht)
 
 embeddings_clean$tx_clean <- tolower(embeddings_clean$tx_clean)
 embeddings_clean$tx_clean <- gsub("[^[:alpha:]]", " ", embeddings_clean$tx_clean)
@@ -236,8 +237,8 @@ embeddings_clean <- embeddings_clean %>%
 model_embedding <- paragraph2vec(x = embeddings_clean,
                                  type = "PV-DM",
                                  dim = 50,
-                                 iter = 20,  
-                                 min_count = 5,
+                                 iter = 100, # 20 
+                                 min_count = 50, # 5
                                  lr = 0.05,
                                  threads = 1)
 
@@ -249,7 +250,7 @@ pca_embedding <- prcomp(embedding)
 pca_embedding_graph <- pca_embedding$x %>% as.data.frame()
 pca_embedding_graph <- tibble::rownames_to_column(pca_embedding_graph, "id")
 pca_embedding_graph$id <- as.numeric(pca_embedding_graph$id)
-rubrik_id <- ai_clean %>% select(id, rubrik_graph)
+rubrik_id <- ai_clean %>% select(id, rubrik_graph, ht)
 pca_embedding_graph <- pca_embedding_graph %>% left_join(rubrik_id, by = "id")
 
 ggplot(pca_embedding_graph, aes(x = PC2, y = PC1, color = rubrik_graph)) +
@@ -266,10 +267,186 @@ ggplot(pca_embedding_graph, aes(x = PC2, y = PC1, color = rubrik_graph)) +
         legend.title=element_blank())
 ```
 
-## Zeit-Analyse
-### Vector Space und Zeit
+```{r fig.height=10, warning=FALSE, cache=TRUE}
+ggplot(pca_embedding_graph, aes(x = PC2, y = PC1, color = rubrik_graph)) +
+  geom_point(size = 4, alpha = 1) +
+  ylab(" ") +
+  xlab(" ") +
+  xlim(c(-0.6,-0.5)) +
+  ylim(c(0.04,0.15)) +
+  scale_color_manual(values = c("#8aabfd", "#4fbbae", "#374e8e", "#ac004f", "#df7c18", "#e3b13e")) +
+  theme_minimal() +
+  guides(color = guide_legend(nrow = 1)) +
+  theme(panel.grid.major.x = element_line(size=.1, color="black"),
+        panel.grid.minor.x = element_blank(), # remove the vertical grid lines
+        panel.grid.major.y = element_line(size=.1, color="black"),
+        legend.position="bottom",
+        legend.title=element_blank()) +
+  geom_label_repel(data = pca_embedding_graph, aes(x = PC2, y = PC1, label = ht))
+```
+
+```{r fig.height=10, warning=FALSE, cache=TRUE}
+ggplot(pca_embedding_graph, aes(x = PC2, y = PC1, color = rubrik_graph)) +
+  geom_point(size = 4, alpha = 1) +
+  ylab(" ") +
+  xlab(" ") +
+  xlim(c(0.24,0.32)) +
+  ylim(c(0.39,0.41)) +
+  scale_color_manual(values = c("#8aabfd", "#4fbbae", "#374e8e", "#ac004f", "#df7c18", "#e3b13e")) +
+  theme_minimal() +
+  guides(color = guide_legend(nrow = 1)) +
+  theme(panel.grid.major.x = element_line(size=.1, color="black"),
+        panel.grid.minor.x = element_blank(), # remove the vertical grid lines
+        panel.grid.major.y = element_line(size=.1, color="black"),
+        legend.position="bottom",
+        legend.title=element_blank()) +
+  geom_label_repel(data = subset(pca_embedding_graph, PC2 > 0.16 | PC1 < -0.25), aes(x = PC2, y = PC1, label = ht))
+```
+
+```{r fig.height=10, warning=FALSE, cache=TRUE}
+ggplot(pca_embedding_graph, aes(x = PC2, y = PC1, color = rubrik_graph)) +
+  geom_point(size = 4, alpha = 1) +
+  ylab(" ") +
+  xlab(" ") +
+  xlim(c(-0.05,0.05)) +
+  ylim(c(-0.3,-0.28)) +
+  scale_color_manual(values = c("#8aabfd", "#4fbbae", "#374e8e", "#ac004f", "#df7c18", "#e3b13e")) +
+  theme_minimal() +
+  guides(color = guide_legend(nrow = 1)) +
+  theme(panel.grid.major.x = element_line(size=.1, color="black"),
+        panel.grid.minor.x = element_blank(), # remove the vertical grid lines
+        panel.grid.major.y = element_line(size=.1, color="black"),
+        legend.position="bottom",
+        legend.title=element_blank()) +
+  #geom_label_repel(data = subset(pca_embedding_graph, PC2 > 0.16 | PC1 < -0.25), aes(x = PC2, y = PC1, label = ht))
+  geom_label_repel(data = pca_embedding_graph, aes(x = PC2, y = PC1, label = ht))
+```
+
+
+### Titel im Vector Space
 
 ```{r, fig.height=10, cache=T}
+# Document Embeddings
+title_embeddings_clean <- ai_clean %>% 
+  select(id, ht, rubrik_graph, year)
+
+title_embeddings_clean$ht <- tolower(title_embeddings_clean$ht)
+title_embeddings_clean$ht <- gsub("[^[:alpha:]]", " ", title_embeddings_clean$ht)
+title_embeddings_clean$ht <- gsub("[[:space:]]+", " ", title_embeddings_clean$ht)
+title_embeddings_clean$ht <- trimws(title_embeddings_clean$ht)
+
+title_embeddings_clean <- title_embeddings_clean %>% 
+  rename("doc_id" = id) %>% 
+  rename("text" = ht)
+
+model_title_embedding <- paragraph2vec(x = title_embeddings_clean,
+                                 type = "PV-DM",
+                                 dim = 200, # 40
+                                 iter = 800,  # 400
+                                 min_count = 50,
+                                 lr = 0.01,
+                                 threads = 1)
+
+title_embedding <- as.matrix(model_title_embedding, which = "docs")
+title_embedding <- as.data.frame(title_embedding)
+
+pca_title_embedding <- prcomp(title_embedding)
+
+pca_title_embedding_graph <- pca_title_embedding$x %>% as.data.frame()
+pca_title_embedding_graph <- tibble::rownames_to_column(pca_title_embedding_graph, "id")
+pca_title_embedding_graph$id <- as.numeric(pca_title_embedding_graph$id)
+rubrik_id <- ai_clean %>% select(id, rubrik_graph, ht)
+pca_title_embedding_graph <- pca_title_embedding_graph %>% left_join(rubrik_id, by = "id")
+
+ggplot(pca_title_embedding_graph, aes(x = PC2, y = PC1, color = rubrik_graph)) +
+  geom_point(size = 2, alpha = 0.5) +
+  ylab(" ") +
+  xlab(" ") +
+  scale_color_manual(values = c("#8aabfd", "#4fbbae", "#374e8e", "#ac004f", "#df7c18", "#e3b13e")) +
+  theme_minimal() +
+  guides(color = guide_legend(nrow = 1)) +
+  theme(panel.grid.major.x = element_line(size=.1, color="black"),
+        panel.grid.minor.x = element_blank(), # remove the vertical grid lines
+        panel.grid.major.y = element_line(size=.1, color="black"),
+        legend.position="bottom",
+        legend.title=element_blank())
+```
+
+```{r fig.height=10, warning=FALSE, cache=TRUE}
+ggplot(pca_title_embedding_graph, aes(x = PC2, y = PC1, color = rubrik_graph)) +
+  geom_point(size = 4, alpha = 1) +
+  ylab(" ") +
+  xlab(" ") +
+  xlim(c(-0.5,-0.45)) +
+  ylim(c(0.26,0.295)) +
+  scale_color_manual(values = c("#8aabfd", "#4fbbae", "#374e8e", "#ac004f", "#df7c18", "#e3b13e")) +
+  theme_minimal() +
+  guides(color = guide_legend(nrow = 1)) +
+  theme(panel.grid.major.x = element_line(size=.1, color="black"),
+        panel.grid.minor.x = element_blank(), # remove the vertical grid lines
+        panel.grid.major.y = element_line(size=.1, color="black"),
+        legend.position="bottom",
+        legend.title=element_blank()) +
+  geom_label_repel(data = subset(pca_title_embedding_graph, PC2 > -0.5 | PC1 > 0.25), aes(x = PC2, y = PC1, label = ht))
+```
+
+```{r fig.height=10, warning=FALSE, cache=TRUE}
+ggplot(pca_title_embedding_graph, aes(x = PC2, y = PC1, color = rubrik_graph)) +
+  geom_point(size = 4, alpha = 1) +
+  ylab(" ") +
+  xlab(" ") +
+  xlim(c(0.48,0.55)) +
+  ylim(c(-0.35,-0.25)) +
+  scale_color_manual(values = c("#8aabfd", "#4fbbae", "#374e8e", "#ac004f", "#df7c18", "#e3b13e")) +
+  theme_minimal() +
+  guides(color = guide_legend(nrow = 1)) +
+  theme(panel.grid.major.x = element_line(size=.1, color="black"),
+        panel.grid.minor.x = element_blank(), # remove the vertical grid lines
+        panel.grid.major.y = element_line(size=.1, color="black"),
+        legend.position="bottom",
+        legend.title=element_blank()) +
+  geom_label_repel(data = subset(pca_title_embedding_graph, PC2 > 0.5 | PC1 > -0.325), aes(label = ht))
+```
+
+```{r fig.height=10, warning=FALSE, cache=TRUE}
+ggplot(pca_title_embedding_graph, aes(x = PC2, y = PC1, color = rubrik_graph)) +
+  geom_point(size = 4, alpha = 1) +
+  ylab(" ") +
+  xlab(" ") +
+  xlim(c(-0.2,-0.1)) +
+  ylim(c(0.495,0.525)) +
+  scale_color_manual(values = c("#8aabfd", "#4fbbae", "#374e8e", "#ac004f", "#df7c18", "#e3b13e")) +
+  theme_minimal() +
+  guides(color = guide_legend(nrow = 1)) +
+  theme(panel.grid.major.x = element_line(size=.1, color="black"),
+        panel.grid.minor.x = element_blank(), # remove the vertical grid lines
+        panel.grid.major.y = element_line(size=.1, color="black"),
+        legend.position="bottom",
+        legend.title=element_blank()) +
+  geom_label_repel(data = subset(pca_title_embedding_graph, PC2 > -0.2 | PC1 > 0.45), aes(label = ht))
+```
+
+```{r fig.height=10, warning=FALSE, cache=TRUE}
+ggplot(pca_title_embedding_graph, aes(x = PC2, y = PC1, color = rubrik_graph)) +
+  geom_point(size = 4, alpha = 1) +
+  ylab(" ") +
+  xlab(" ") +
+  xlim(c(0.29,0.31)) +
+  ylim(c(0.125,0.175)) +
+  scale_color_manual(values = c("#8aabfd", "#4fbbae", "#374e8e", "#ac004f", "#df7c18", "#e3b13e")) +
+  theme_minimal() +
+  guides(color = guide_legend(nrow = 1)) +
+  theme(panel.grid.major.x = element_line(size=.1, color="black"),
+        panel.grid.minor.x = element_blank(), # remove the vertical grid lines
+        panel.grid.major.y = element_line(size=.1, color="black"),
+        legend.position="bottom",
+        legend.title=element_blank()) +
+  geom_label_repel(data = subset(pca_title_embedding_graph, PC2 > -0.2 | PC1 > 0.45), aes(label = ht))
+```
+
+## Zeit-Analyse
+```{r eval=FALSE, fig.height=10, cache=TRUE, include=FALSE}
+### Vector Space und Zeit
 pca_embedding_graph <- pca_embedding$x %>% as.data.frame()
 pca_embedding_graph <- tibble::rownames_to_column(pca_embedding_graph, "id")
 pca_embedding_graph$id <- as.numeric(pca_embedding_graph$id)
@@ -1382,3 +1559,9 @@ View(tx_tokens)
 #   select(rubrik) %>% 
 #   distinct(rubrik)
 ```
+
+
+
+
+
+
